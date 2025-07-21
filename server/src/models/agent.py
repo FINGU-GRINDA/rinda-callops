@@ -55,6 +55,10 @@ class Agent(BaseModel):
     settings: Optional[AgentSettings] = None
     analytics: Optional[Dict[str, Any]] = None
     status: AgentStatus = AgentStatus.ACTIVE
+    # Visual builder fields
+    nodes: Optional[List[Dict[str, Any]]] = None
+    edges: Optional[List[Dict[str, Any]]] = None
+    integrations: Optional[List[Dict[str, Any]]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -95,6 +99,10 @@ class CreateAgentRequest(BaseModel):
     tools: List[Dict[str, Any]] = Field(default_factory=list)  # Changed to Dict for tool objects
     business_data: Optional[BusinessData] = None
     settings: Optional[AgentSettings] = None
+    # Visual builder fields
+    nodes: Optional[List[Dict[str, Any]]] = None
+    edges: Optional[List[Dict[str, Any]]] = None
+    integrations: Optional[List[Dict[str, Any]]] = None
 
 
 class UpdateAgentRequest(BaseModel):
@@ -109,6 +117,10 @@ class UpdateAgentRequest(BaseModel):
     first_message: Optional[str] = None
     voice: Optional[str] = None
     language: Optional[str] = None
-    tools: Optional[List[str]] = None
+    tools: Optional[List[Dict[str, Any]]] = None  # Changed to handle tool objects with configuration
     settings: Optional[AgentSettings] = None
     status: Optional[AgentStatus] = None
+    # Visual builder fields
+    nodes: Optional[List[Dict[str, Any]]] = None
+    edges: Optional[List[Dict[str, Any]]] = None
+    integrations: Optional[List[Dict[str, Any]]] = None

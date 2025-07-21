@@ -14,10 +14,27 @@ export interface Tool {
   name: string;
   display_name?: string;
   description: string;
-  type: 'function' | 'api_call' | 'database_query' | 'custom';
+  type?: 'function' | 'webhook' | 'custom_api' | 'sheet_append' | 'sms_send' | 'info';
   enabled: boolean;
   configuration?: Record<string, any>;
-  json_schema?: Record<string, any>;
+  json_schema?: {
+    type: 'function';
+    function: {
+      name: string;
+      description: string;
+      parameters?: {
+        type: 'object';
+        properties?: Record<string, any>;
+        required?: string[];
+      };
+    };
+  };
+  // Legacy format for backward compatibility
+  parameters?: {
+    type: 'object';
+    properties?: Record<string, any>;
+    required?: string[];
+  };
 }
 
 export interface FileUploadResult {

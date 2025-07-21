@@ -83,14 +83,14 @@ CARTESIA_LANGUAGE_CODES = {
     "hi-IN": "hi",
 }
 
-# OpenAI to Cartesia voice mapping
+# OpenAI to Cartesia voice mapping (only new voices from 2024)
 OPENAI_TO_CARTESIA_MAPPING = {
-    "alloy": "default",
-    "echo": "male", 
-    "fable": "professional",
-    "onyx": "male",
-    "nova": "female",
-    "shimmer": "female"
+    # New OpenAI voices (2024) - mapping to appropriate Cartesia voices
+    "ash": "male",        # Ash has a deeper, masculine tone
+    "ballad": "professional",  # Ballad has a British accent, professional sound
+    "coral": "female",    # Coral has a warm, feminine voice
+    "sage": "professional",    # Sage has a wise, professional tone
+    "verse": "female"     # Verse has a melodic, feminine quality
 }
 
 def get_cartesia_voice(language: str, voice_type: str = "default") -> str:

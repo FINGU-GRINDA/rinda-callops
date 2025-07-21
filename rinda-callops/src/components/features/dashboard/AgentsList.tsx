@@ -93,8 +93,10 @@ export default function AgentsList() {
       {agents.map((agent) => (
         <Card 
           key={agent.id} 
-          className="hover:shadow-lg transition-shadow cursor-pointer"
-          onClick={() => router.push(`/agents/${agent.id}`)}
+          className={`hover:shadow-lg transition-shadow cursor-pointer ${
+            agent.status === 'draft' ? 'border-yellow-500 border-2' : ''
+          }`}
+          onClick={() => router.push(`/agents/${agent.id}/flow`)}
         >
           <CardHeader>
             <div className="flex justify-between items-start">
@@ -105,8 +107,11 @@ export default function AgentsList() {
                 </CardTitle>
                 <CardDescription>{agent.business_name}</CardDescription>
               </div>
-              <Badge variant={agent.status === 'active' ? 'default' : 'secondary'}>
-                {agent.status}
+              <Badge 
+                variant={agent.status === 'active' ? 'default' : 'secondary'}
+                className={agent.status === 'draft' ? 'bg-yellow-500 text-white hover:bg-yellow-600' : ''}
+              >
+                {agent.status === 'draft' ? 'Building' : agent.status}
               </Badge>
             </div>
           </CardHeader>
@@ -133,11 +138,11 @@ export default function AgentsList() {
                 className="flex-1"
                 onClick={(e) => {
                   e.stopPropagation();
-                  router.push(`/agents/${agent.id}/edit`);
+                  router.push(`/agents/${agent.id}/flow`);
                 }}
               >
                 <Edit className="w-4 h-4 mr-1" />
-                Edit
+                {agent.status === 'draft' ? 'Continue Building' : 'Edit Flow'}
               </Button>
               <Button
                 variant="outline"
@@ -145,7 +150,8 @@ export default function AgentsList() {
                 className="flex-1"
                 onClick={(e) => {
                   e.stopPropagation();
-                  router.push(`/agents/${agent.id}/test`);
+                  // Navigate to flow with test modal open (we'll add this functionality)
+                  router.push(`/agents/${agent.id}/flow?test=true`);
                 }}
               >
                 <Phone className="w-4 h-4 mr-1" />

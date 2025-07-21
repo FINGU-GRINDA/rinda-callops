@@ -279,7 +279,7 @@ export default function EnhancedDashboard() {
                     <div 
                       key={agent.id} 
                       className="bg-gradient-to-br from-slate-800/30 to-slate-900/30 rounded-xl border border-gray-700/30 p-4 hover:border-gray-600/50 transition-all duration-300 cursor-pointer group"
-                      onClick={() => router.push(`/agents/${agent.id}`)}
+                      onClick={() => router.push(`/agents/${agent.id}/flow`)}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">

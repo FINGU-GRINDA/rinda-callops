@@ -14,6 +14,15 @@ class ToolType(str, Enum):
     CUSTOM_API = "custom_api"
     FUNCTION = "function"
     WEBHOOK = "webhook"
+    # Additional tool types for phone agent
+    MENU = "menu"
+    ORDER = "order"
+    TAKE_ORDER = "take-order"
+    FAQ = "faq"
+    ANSWER_QUESTIONS = "answer-questions"
+    REFERENCE = "reference"
+    # AI-generated tools
+    AI_GENERATED = "ai_generated"
 
 
 class ParameterType(str, Enum):
@@ -50,7 +59,7 @@ class Tool(BaseModel):
     agent_id: Optional[str] = None
     name: str
     display_name: Optional[str] = None
-    description: str
+    description: Optional[str] = None
     type: ToolType
     enabled: bool = True
     configuration: Optional[Dict[str, Any]] = None

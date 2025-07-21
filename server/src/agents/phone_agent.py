@@ -120,35 +120,56 @@ class CallActions(llm.ToolContext):
             def make_tool_func(captured_tool_id: str):
                 async def tool_func(context: RunContext):
                     """Execute a custom tool with RunContext"""
+                    logger.info(f"🔧 TOOL CALLED: {captured_tool_id} - Starting execution...")
+                    logger.info(f"🔧 RunContext type: {type(context)}")
+                    logger.info(f"🔧 RunContext attributes: {dir(context)}")
+                    
                     try:
                         # No parameters needed for menu tools
                         params = {}
+                        logger.info(f"🔧 Tool parameters prepared: {params}")
                         
                         # Get tool info
+                        logger.info(f"🔧 Fetching tool from database: {captured_tool_id}")
                         tool = await self.tool_executor.get_tool(captured_tool_id)
                         if not tool:
-                            logger.error(f"Tool {captured_tool_id} not found in database")
+                            logger.error(f"🔧 ERROR: Tool {captured_tool_id} not found in database")
                             return {"error": f"Tool {captured_tool_id} not found"}
                         
-                        logger.info(f"Executing tool: {tool.name} ({captured_tool_id})")
-                        logger.info(f"Tool type: {tool.type}")
-                        logger.info(f"Tool description: {tool.description}")
-                        logger.info(f"Tool parameters: {params}")
+                        logger.info(f"🔧 Tool found - Name: {tool.name}, Type: {tool.type}")
+                        logger.info(f"🔧 Tool description: {tool.description or 'No description provided'}")
+                        logger.info(f"🔧 Tool enabled: {tool.enabled}")
+                        logger.info(f"🔧 Tool configuration keys: {list(tool.configuration.keys()) if tool.configuration else 'None'}")
+                        if tool.configuration:
+                            logger.info(f"🔧 Tool configuration full content: {tool.configuration}")
+                            if 'menuItems' in tool.configuration:
+                                logger.info(f"🔧 Menu items count: {len(tool.configuration['menuItems'])}")
+                                for i, item in enumerate(tool.configuration['menuItems'][:3]):  # Show first 3
+                                    logger.info(f"🔧 Menu item {i+1}: {item}")
+                        else:
+                            logger.error(f"🔧 ERROR: Tool {tool.name} has NO configuration data!")
                         
                         # Execute the tool
+                        logger.info(f"🔧 Executing tool via ToolExecutor...")
                         result = await self.tool_executor.execute(captured_tool_id, params)
+                        logger.info(f"🔧 Tool executor returned result - Success: {result.success}")
                         
                         if result.success:
-                            logger.info(f"Tool {tool.name} returned successfully")
-                            logger.info(f"Tool result type: {type(result.result)}")
-                            logger.info(f"Tool result: {result.result}")
+                            logger.info(f"🔧 SUCCESS: Tool {tool.name} executed successfully")
+                            logger.info(f"🔧 Result type: {type(result.result)}")
+                            logger.info(f"🔧 Result preview: {str(result.result)[:200]}...")
                             return result.result
                         else:
-                            logger.error(f"Tool {tool.name} failed: {result.error}")
+                            logger.error(f"🔧 FAILED: Tool {tool.name} execution failed")
+                            logger.error(f"🔧 Error details: {result.error}")
                             return {"error": result.error}
                             
                     except Exception as e:
-                        logger.error(f"Error executing tool {captured_tool_id}: {e}")
+                        logger.error(f"🔧 EXCEPTION: Error executing tool {captured_tool_id}")
+                        logger.error(f"🔧 Exception type: {type(e).__name__}")
+                        logger.error(f"🔧 Exception message: {str(e)}")
+                        import traceback
+                        logger.error(f"🔧 Exception traceback: {traceback.format_exc()}")
                         return {"error": f"Tool execution failed: {str(e)}"}
                 
                 # Set unique function name before returning
@@ -165,12 +186,109 @@ class CallActions(llm.ToolContext):
             # Apply the decorator with proper name and description using current function_tool
             if tool_info:
                 # Create a clear, unambiguous description using proper function_tool
-                tool_func = function_tool(
-                    name=tool_info.name,
-                    description=tool_info.description
-                )(dynamic_func)
+                logger.info(f"🔧 REGISTERING TOOL: {tool_info.name} (ID: {tool_id})")
+                
+                # Provide default description if empty/None
+                description = tool_info.description or ""
+                if not description.strip():
+                    default_descriptions = {
+                        "menu": "Returns the complete restaurant menu with all items and prices. USE THIS TOOL ONLY WHEN: customer asks 'What's on the menu?', 'What food do you have?', 'What can I order?', 'Do you have pizza?', 'How much does X cost?', 'What are your prices?'. DO NOT USE THIS TOOL WHEN: customer wants to place an order.",
+                        "faq": "Answer frequently asked questions about the business. USE THIS TOOL ONLY WHEN: customer asks common questions about hours, location, policies, services, etc.",
+                        "order": "Processes a customer's order after they have decided what to purchase. USE THIS TOOL ONLY WHEN: customer says 'I want to order X', 'I'll have the X', 'Can I get X', or explicitly states they want to place an order."
+                    }
+                    description = default_descriptions.get(tool_id, f"Execute {tool_info.name} tool to retrieve information.")
+                
+                logger.info(f"🔧 Tool description: {description}")
+                logger.info(f"🔧 Checking for JSON schema - hasattr: {hasattr(tool_info, 'json_schema')}")
+                if hasattr(tool_info, 'json_schema'):
+                    logger.info(f"🔧 JSON schema value: {tool_info.json_schema}")
+                
+                # Special handling for order tools to create proper parameter extraction
+                if tool_info.name.lower() == 'order' and tool_info.type in ['ai_generated', 'reference']:
+                    logger.info(f"🔧 Creating typed order function for proper parameter extraction")
+                    from typing import Annotated
+                    
+                    async def order_tool_func(
+                        customer_name: Annotated[str, "Full name of the customer placing the order"],
+                        items: Annotated[str, "Complete list of items being ordered with quantities (e.g. '2 Pepperoni Passion pizzas, 1 Caesar Salad')"],
+                        phone_number: Annotated[str, "Customer's phone number for contact"] = "",
+                        total_amount: Annotated[str, "Total cost of the order if mentioned"] = "",
+                        delivery_address: Annotated[str, "Delivery address if this is a delivery order"] = "",
+                        notes: Annotated[str, "Any special instructions or notes for the order"] = ""
+                    ):
+                        logger.info(f"🔧 Order tool called with: customer_name={customer_name}, items={items}")
+                        params = {
+                            'customer_name': customer_name,
+                            'items': items,
+                            'phone_number': phone_number,
+                            'total_amount': total_amount,
+                            'delivery_address': delivery_address,
+                            'notes': notes
+                        }
+                        # Remove empty string parameters to keep the data clean
+                        params = {k: v for k, v in params.items() if (v.strip() if isinstance(v, str) else True)}
+                        logger.info(f"🔧 Cleaned parameters: {params}")
+                        return await self.execute_custom_tool(tool_info.name, params)
+                    
+                    tool_func = function_tool(
+                        name=tool_info.name,
+                        description=description
+                    )(order_tool_func)
+                    logger.info(f"🔧 Order tool registered with typed parameters")
+                    return tool_func
+                
+                # Use JSON schema if available for proper parameter extraction
+                elif hasattr(tool_info, 'json_schema') and tool_info.json_schema:
+                    logger.info(f"🔧 Using JSON schema for tool: {tool_info.name}")
+                    logger.info(f"🔧 JSON schema: {tool_info.json_schema}")
+                    
+                    # For order tools, create function with specific parameters based on schema
+                    if tool_info.name == 'order' and tool_info.json_schema.get('properties'):
+                        from typing import Annotated
+                        
+                        async def order_tool_func(
+                            customer_name: Annotated[str, "Full name of the customer placing the order"],
+                            items: Annotated[str, "Complete list of items being ordered with quantities"],
+                            phone_number: Annotated[str, "Customer's phone number for contact"] = "",
+                            total_amount: Annotated[str, "Total cost of the order if mentioned"] = "",
+                            delivery_address: Annotated[str, "Delivery address if this is a delivery order"] = "",
+                            notes: Annotated[str, "Any special instructions or notes for the order"] = ""
+                        ):
+                            logger.info(f"🔧 Order tool called with: customer_name={customer_name}, items={items}")
+                            params = {
+                                'customer_name': customer_name,
+                                'items': items,
+                                'phone_number': phone_number,
+                                'total_amount': total_amount,
+                                'delivery_address': delivery_address,
+                                'notes': notes
+                            }
+                            return await self.execute_custom_tool(tool_info.name, params)
+                        
+                        tool_func = function_tool(
+                            name=tool_info.name,
+                            description=description
+                        )(order_tool_func)
+                    else:
+                        # Generic schema-based function for other tools
+                        async def schema_based_func(**kwargs):
+                            logger.info(f"🔧 Executing {tool_info.name} with parameters: {kwargs}")
+                            return await self.execute_custom_tool(tool_info.name, kwargs)
+                        
+                        tool_func = function_tool(
+                            name=tool_info.name or f"tool_{tool_id}",
+                            description=description
+                        )(schema_based_func)
+                else:
+                    # Fallback to original approach
+                    tool_func = function_tool(
+                        name=tool_info.name or f"tool_{tool_id}",
+                        description=description
+                    )(dynamic_func)
+                logger.info(f"🔧 Tool registered successfully: {tool_func}")
                 return tool_func
             else:
+                logger.info(f"🔧 REGISTERING TOOL: {tool_id} (no tool_info)")
                 return function_tool()(dynamic_func)
             
         except Exception as e:
@@ -182,8 +300,16 @@ class CallActions(llm.ToolContext):
         for tool_id in self.agent_config.tools:
             tool = await self.tool_executor.get_tool(tool_id)
             if tool and tool.name == tool_name:
-                result = await self.tool_executor.execute(tool_id, parameters)
-                return result
+                response = await self.tool_executor.execute(tool_id, parameters)
+                
+                # Extract the actual result from the ToolExecutionResponse
+                if hasattr(response, 'success') and response.success:
+                    # Return the result data directly for OpenAI Realtime API
+                    return response.result if response.result is not None else {"success": True}
+                else:
+                    # Return error information for failed executions
+                    error_msg = response.error if hasattr(response, 'error') else "Tool execution failed"
+                    return {"error": error_msg, "success": False}
         
         return {"error": f"Tool '{tool_name}' not found"}
 
@@ -193,6 +319,7 @@ async def run_realtime_agent(
     participant: rtc.RemoteParticipant,
     agent_config: AgentModel,
     tool_executor: ToolExecutor,
+    preloaded_tools: Dict[str, Any],
 ):
     """Run the agent using OpenAI Realtime API with MultimodalAgent"""
     
@@ -205,6 +332,7 @@ async def run_realtime_agent(
         room=ctx.room,
         agent_config=agent_config,
         tool_executor=tool_executor,
+        preloaded_tools=preloaded_tools,
     )
 
     # Get instructions and initial message
@@ -227,34 +355,23 @@ CRITICAL INSTRUCTIONS FOR TOOL USAGE:
 """
     instructions = f"{instructions}{tool_instructions}"
     
-    # Add language instruction if needed
-    if agent_config.language and agent_config.language != "en-US":
-        language_name = {
-            "es-ES": "Spanish",
-            "fr-FR": "French",
-            "de-DE": "German",
-            "it-IT": "Italian",
-            "pt-BR": "Portuguese",
-            "ja-JP": "Japanese",
-            "ko-KR": "Korean",
-            "zh-CN": "Chinese"
-        }.get(agent_config.language, "the requested language")
-        instructions = f"{instructions}\n\nIMPORTANT: Always respond in {language_name} only."
+    # Force English language for OpenAI Realtime API
+    instructions = f"{instructions}\n\nIMPORTANT: Always respond in English only. Do not use any other language."
     
     initial_message = agent_config.first_message or agent_config.greeting or "Hello! How can I help you today?"
     
-    # Map voices to OpenAI Realtime voices
+    # Map voices to OpenAI Realtime voices (new voices from 2024)
     voice_mapping = {
-        "alloy": "alloy",
-        "echo": "echo",
-        "fable": "shimmer",
-        "onyx": "ash", 
-        "nova": "ballad",
-        "shimmer": "shimmer"
+        # New expressive voices with better emotion control
+        "ash": "ash",
+        "ballad": "ballad",
+        "coral": "coral",
+        "sage": "sage",
+        "verse": "verse"
     }
     
     # Get the appropriate voice for OpenAI Realtime
-    realtime_voice = voice_mapping.get(agent_config.voice, "alloy")
+    realtime_voice = voice_mapping.get(agent_config.voice, "ash")
     logger.info(f"Using OpenAI Realtime voice: {realtime_voice}")
     
     # Connect to room first
@@ -265,16 +382,24 @@ CRITICAL INSTRUCTIONS FOR TOOL USAGE:
     try:
         # Get the tools from the function context
         agent_tools = fnc_ctx._tools if hasattr(fnc_ctx, '_tools') else []
-        logger.info(f"Agent has {len(agent_tools)} tools available")
+        logger.info(f"🔧 Agent has {len(agent_tools)} tools available")
+        
+        # Log each tool for debugging
+        for i, tool in enumerate(agent_tools):
+            logger.info(f"🔧 Tool {i+1}: {tool}")
+            logger.info(f"🔧 Tool name: {getattr(tool, '__name__', 'unknown')}")
+            logger.info(f"🔧 Tool doc: {getattr(tool, '__doc__', 'no description')}")
         
         # Create agent with instructions and tools
+        logger.info(f"🔧 Creating Agent with {len(agent_tools)} tools...")
         agent = Agent(
             instructions=instructions,
             tools=agent_tools
         )
+        logger.info(f"🔧 Agent created successfully")
         
-        # Determine Deepgram language for STT
-        deepgram_language = "en" if agent_config.language == "en-US" else "multi"
+        # Force English for Deepgram STT with OpenAI Realtime API
+        deepgram_language = "en"
         
         # Import TurnDetection for proper configuration
         from openai.types.beta.realtime.session import TurnDetection
@@ -326,6 +451,7 @@ async def run_multimodal_agent(
     participant: rtc.RemoteParticipant,
     agent_config: AgentModel,
     tool_executor: ToolExecutor,
+    preloaded_tools: Dict[str, Any],
 ):
     """Run the multimodal agent using STT-LLM-TTS pipeline"""
     
@@ -338,6 +464,7 @@ async def run_multimodal_agent(
         room=ctx.room,
         agent_config=agent_config,
         tool_executor=tool_executor,
+        preloaded_tools=preloaded_tools,
     )
 
     # Get instructions and initial message
@@ -432,9 +559,9 @@ CRITICAL INSTRUCTIONS FOR TOOL USAGE AND NATURAL RESPONSES:
             logger.warning("Cartesia API key not found, falling back to OpenAI TTS")
             tts = openai.TTS(
                 model="tts-1",
-                voice=agent_config.voice or "alloy"
+                voice=agent_config.voice or "ash"
             )
-            logger.info(f"Using OpenAI TTS with voice: {agent_config.voice or 'alloy'}")
+            logger.info(f"Using OpenAI TTS with voice: {agent_config.voice or 'ash'}")
         else:
             tts = cartesia.TTS(
                 model="sonic-2", 
@@ -449,7 +576,7 @@ CRITICAL INSTRUCTIONS FOR TOOL USAGE AND NATURAL RESPONSES:
             logger.info("Falling back to OpenAI TTS due to Cartesia error")
             tts = openai.TTS(
                 model="tts-1",
-                voice=agent_config.voice or "alloy"
+                voice=agent_config.voice or "ash"
             )
         except Exception as e2:
             logger.error(f"Failed to create OpenAI TTS as well: {e2}")
@@ -505,6 +632,7 @@ async def run_voice_pipeline_agent(
     participant: rtc.RemoteParticipant,
     agent_config: AgentModel,
     tool_executor: ToolExecutor,
+    preloaded_tools: Dict[str, Any],
 ):
     """Run the voice pipeline agent using STT-LLM-TTS with turn detection"""
     
@@ -516,6 +644,7 @@ async def run_voice_pipeline_agent(
         room=ctx.room,
         agent_config=agent_config,
         tool_executor=tool_executor,
+        preloaded_tools=preloaded_tools,
     )
 
     # Get instructions and initial message
@@ -594,9 +723,9 @@ CRITICAL INSTRUCTIONS FOR TOOL USAGE:
             logger.warning("Cartesia API key not found, falling back to OpenAI TTS")
             tts = openai.TTS(
                 model="tts-1",
-                voice=agent_config.voice or "alloy"
+                voice=agent_config.voice or "ash"
             )
-            logger.info(f"Using OpenAI TTS with voice: {agent_config.voice or 'alloy'}")
+            logger.info(f"Using OpenAI TTS with voice: {agent_config.voice or 'ash'}")
         else:
             tts = cartesia.TTS(
                 model="sonic-2", 
@@ -611,7 +740,7 @@ CRITICAL INSTRUCTIONS FOR TOOL USAGE:
             logger.info("Falling back to OpenAI TTS due to Cartesia error")
             tts = openai.TTS(
                 model="tts-1",
-                voice=agent_config.voice or "alloy"
+                voice=agent_config.voice or "ash"
             )
         except Exception as e2:
             logger.error(f"Failed to create OpenAI TTS as well: {e2}")
@@ -738,6 +867,37 @@ async def entrypoint(ctx: JobContext):
 
     # Initialize tool executor
     tool_executor = ToolExecutor()
+    
+    # Preload tools for the agent
+    preloaded_tools = {}
+    
+    # Load regular tools from agent.tools
+    if agent_config.tools:
+        logger.info(f"Preloading {len(agent_config.tools)} regular tools for agent {agent_config.name}")
+        for tool_id in agent_config.tools:
+            tool = await db_service.get_tool(tool_id)
+            if tool:
+                preloaded_tools[tool_id] = tool
+                logger.info(f"✓ Preloaded tool: {tool.name} ({tool_id})")
+            else:
+                logger.warning(f"✗ Tool {tool_id} not found in database during preload")
+    
+    # Also load AI-generated tools for this agent
+    try:
+        # Get all tools for this agent (including AI-generated ones)
+        agent_tools = await db_service.get_tools_by_agent(agent_id)
+        ai_generated_tools = [tool for tool in agent_tools if getattr(tool, 'ai_generated', False) or tool.id.startswith(f"{agent_id}_")]
+        
+        if ai_generated_tools:
+            logger.info(f"Found {len(ai_generated_tools)} AI-generated tools for agent {agent_config.name}")
+            for tool in ai_generated_tools:
+                if tool.id not in preloaded_tools:  # Avoid duplicates
+                    preloaded_tools[tool.id] = tool
+                    logger.info(f"✓ Preloaded AI tool: {tool.name} ({tool.id})")
+    except Exception as e:
+        logger.warning(f"Could not load AI-generated tools: {e}")
+    
+    logger.info(f"Total preloaded tools: {len(preloaded_tools)}")
 
     # Check if this is an outbound call from job metadata
     is_outbound = False
@@ -795,10 +955,10 @@ async def entrypoint(ctx: JobContext):
             use_voice_pipeline = job_metadata.get("use_voice_pipeline", False)
     
     if use_voice_pipeline:
-        await run_voice_pipeline_agent(ctx, participant, agent_config, tool_executor)
+        await run_voice_pipeline_agent(ctx, participant, agent_config, tool_executor, preloaded_tools)
     else:
         # Use OpenAI Realtime API instead of STT-LLM-TTS pipeline
-        await run_realtime_agent(ctx, participant, agent_config, tool_executor)
+        await run_realtime_agent(ctx, participant, agent_config, tool_executor, preloaded_tools)
 
 
 if __name__ == "__main__":

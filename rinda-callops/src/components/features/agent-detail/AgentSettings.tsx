@@ -23,7 +23,7 @@ export default function AgentSettings({ agent, onUpdate }: AgentSettingsProps) {
     business_name: agent.business_name || '',
     first_message: agent.first_message || '',
     instructions: agent.instructions || '',
-    voice: agent.voice || 'alloy',
+    voice: agent.voice || 'ash',
     language: agent.language || 'en-US'
   });
   const [saving, setSaving] = useState(false);
@@ -132,12 +132,11 @@ export default function AgentSettings({ agent, onUpdate }: AgentSettingsProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="alloy">Alloy (Balanced)</SelectItem>
-                <SelectItem value="echo">Echo (Expressive)</SelectItem>
-                <SelectItem value="fable">Fable (Energetic)</SelectItem>
-                <SelectItem value="onyx">Onyx (Deep)</SelectItem>
-                <SelectItem value="nova">Nova (Bright)</SelectItem>
-                <SelectItem value="shimmer">Shimmer (Gentle)</SelectItem>
+                <SelectItem value="ash">Ash (Deep & Masculine)</SelectItem>
+                <SelectItem value="ballad">Ballad (British & Professional)</SelectItem>
+                <SelectItem value="coral">Coral (Warm & Feminine)</SelectItem>
+                <SelectItem value="sage">Sage (Wise & Professional)</SelectItem>
+                <SelectItem value="verse">Verse (Melodic & Feminine)</SelectItem>
               </SelectContent>
             </Select>
           </div>

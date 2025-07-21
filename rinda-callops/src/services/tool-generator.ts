@@ -48,10 +48,16 @@ export class ToolGenerator {
           'Authorization': `Bearer ${await this.getAuthToken()}`
         },
         body: JSON.stringify({
-          businessName: context.businessName,
-          industry: context.industry || context.businessType || 'General',
-          description: context.description || context.businessDescription,
-          existingTools: context.existingTools
+          businessData: {
+            name: context.businessName,
+            type: context.industry || context.businessType || 'General',
+            description: context.description || context.businessDescription,
+            requirements: context.customRequirements || 'Generate tools suitable for this business'
+          },
+          toolConfiguration: {
+            existingTools: context.existingTools,
+            services: context.services
+          }
         })
       });
 
@@ -61,9 +67,18 @@ export class ToolGenerator {
 
       const { tools } = await response.json();
 
-      return tools.map((tool: FunctionDefinition) => ({
+      // Convert the response to the expected format
+      return tools.map((tool: any) => ({
         type: 'function' as const,
-        function: tool
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.json_schema || {
+            type: 'object',
+            properties: {},
+            required: []
+          }
+        }
       }));
     } catch (error) {
       console.error('Error generating tools:', error);

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Phone, TestTube, Settings, Activity, Trash2, Edit } from 'lucide-react';
+import { ArrowLeft, Phone, TestTube, Settings, Activity, Trash2, Edit, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,12 +20,14 @@ interface Agent {
   name: string;
   business_name: string;
   business_type: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'draft';
   created_at: string;
   instructions?: string;
   first_message?: string;
   voice?: string;
   tools?: any[];
+  nodes?: any[];
+  edges?: any[];
 }
 
 export default function AgentDetailPage() {
@@ -156,9 +158,13 @@ export default function AgentDetailPage() {
               <div className="flex items-center gap-4 mt-3">
                 <Badge 
                   variant={agent.status === 'active' ? 'default' : 'secondary'}
-                  className={agent.status === 'active' ? 'bg-green-500' : 'bg-gray-500'}
+                  className={
+                    agent.status === 'active' ? 'bg-green-500' : 
+                    agent.status === 'draft' ? 'bg-yellow-500' : 
+                    'bg-gray-500'
+                  }
                 >
-                  {agent.status}
+                  {agent.status === 'draft' ? 'Building' : agent.status}
                 </Badge>
                 <Badge variant="outline" className="text-gray-300 border-gray-600/50">
                   {agent.business_type}
@@ -167,6 +173,12 @@ export default function AgentDetailPage() {
             </div>
             
             <div className="flex gap-3">
+              <Link href={`/agents/${agent.id}/flow`}>
+                <Button className="bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white border-0">
+                  <Workflow className="mr-2 h-4 w-4" />
+                  Edit Flow
+                </Button>
+              </Link>
               <Link href={`/agents/${agent.id}/edit`}>
                 <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white border-0">
                   <Edit className="mr-2 h-4 w-4" />

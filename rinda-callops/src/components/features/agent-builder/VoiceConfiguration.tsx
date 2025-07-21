@@ -11,12 +11,11 @@ import { Mic, Wand2, Volume2, PlayCircle } from 'lucide-react';
 import { ToolGenerator } from '@/services/tool-generator';
 
 const voices = [
-  { id: 'alloy', name: 'Alloy (Balanced)', provider: 'openai' },
-  { id: 'echo', name: 'Echo (Expressive)', provider: 'openai' },
-  { id: 'fable', name: 'Fable (Energetic)', provider: 'openai' },
-  { id: 'onyx', name: 'Onyx (Deep)', provider: 'openai' },
-  { id: 'nova', name: 'Nova (Bright)', provider: 'openai' },
-  { id: 'shimmer', name: 'Shimmer (Gentle)', provider: 'openai' }
+  { id: 'ash', name: 'Ash (Deep & Masculine)', provider: 'openai' },
+  { id: 'ballad', name: 'Ballad (British & Professional)', provider: 'openai' },
+  { id: 'coral', name: 'Coral (Warm & Feminine)', provider: 'openai' },
+  { id: 'sage', name: 'Sage (Wise & Professional)', provider: 'openai' },
+  { id: 'verse', name: 'Verse (Melodic & Feminine)', provider: 'openai' }
 ];
 
 interface VoiceConfigurationProps {
@@ -31,7 +30,7 @@ interface VoiceConfigurationProps {
 
 export default function VoiceConfiguration({ config, businessContext, onUpdate }: VoiceConfigurationProps) {
   const [localConfig, setLocalConfig] = useState({
-    voiceId: config.voiceId || 'alloy',
+    voiceId: config.voiceId || 'ash',
     language: config.language || 'en',
     firstMessage: config.firstMessage || '',
     systemPrompt: config.systemPrompt || '',
@@ -129,8 +128,8 @@ export default function VoiceConfiguration({ config, businessContext, onUpdate }
                 min="0.5"
                 max="2.0"
                 step="0.1"
-                value={localConfig.voiceSpeed}
-                onChange={(e) => handleFieldChange('voiceSpeed', parseFloat(e.target.value))}
+                value={localConfig.voiceSpeed || ''}
+                onChange={(e) => handleFieldChange('voiceSpeed', e.target.value ? parseFloat(e.target.value) : 1.0)}
               />
             </div>
             
@@ -142,8 +141,8 @@ export default function VoiceConfiguration({ config, businessContext, onUpdate }
                 min="0"
                 max="1"
                 step="0.1"
-                value={localConfig.voiceTemperature}
-                onChange={(e) => handleFieldChange('voiceTemperature', parseFloat(e.target.value))}
+                value={localConfig.voiceTemperature || ''}
+                onChange={(e) => handleFieldChange('voiceTemperature', e.target.value ? parseFloat(e.target.value) : 0.7)}
               />
             </div>
           </div>

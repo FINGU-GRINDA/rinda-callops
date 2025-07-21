@@ -90,7 +90,10 @@ class FirebaseService:
             'tools': tool_ids,  # Store tool IDs
             'businessData': data.business_data.dict() if data.business_data else None,
             'settings': data.settings.dict() if data.settings else None,
-            'status': 'active',
+            'status': 'draft',  # Default to draft for new agents
+            'nodes': data.nodes if data.nodes else None,
+            'edges': data.edges if data.edges else None,
+            'integrations': data.integrations if data.integrations else None,
             'createdAt': firestore.SERVER_TIMESTAMP,
             'updatedAt': firestore.SERVER_TIMESTAMP,
         }
@@ -117,6 +120,9 @@ class FirebaseService:
             'voice': agent_data.get('voice'),
             'language': agent_data.get('language', 'en-US'),
             'tools': agent_data.get('tools', []),
+            'nodes': agent_data.get('nodes'),
+            'edges': agent_data.get('edges'),
+            'integrations': agent_data.get('integrations'),
             'settings': agent_data.get('settings'),
             'status': agent_data.get('status', 'active'),
             'created_at': agent_data['createdAt'],
@@ -149,6 +155,9 @@ class FirebaseService:
             'language': data.get('language', 'en-US'),
             'tools': data.get('tools', []),
             'settings': data.get('settings'),
+            'nodes': data.get('nodes'),
+            'edges': data.get('edges'),
+            'integrations': data.get('integrations'),
             'status': data.get('status', 'active'),
             'created_at': data.get('createdAt', datetime.utcnow()),
             'updated_at': data.get('updatedAt', datetime.utcnow()),
@@ -191,16 +200,112 @@ class FirebaseService:
         if data.language is not None:
             update_data['language'] = data.language
         if data.tools is not None:
-            update_data['tools'] = data.tools
+            # Handle tool objects with configuration
+            tool_ids = []
+            for tool in data.tools:
+                if isinstance(tool, dict) and 'id' in tool:
+                    tool_id = tool['id']
+                    tool_ids.append(tool_id)
+                    
+                    # Create or update the tool with Google Sheets configuration
+                    await self._create_or_update_tool_for_agent(agent_id, tool)
+                elif isinstance(tool, str):
+                    # Legacy: tool ID string
+                    tool_ids.append(tool)
+            
+            update_data['tools'] = tool_ids
         if data.settings is not None:
             update_data['settings'] = data.settings.dict() if hasattr(data.settings, 'dict') else data.settings
         if data.status is not None:
             update_data['status'] = data.status
+        if data.nodes is not None:
+            update_data['nodes'] = data.nodes
+        if data.edges is not None:
+            update_data['edges'] = data.edges
+        if data.integrations is not None:
+            update_data['integrations'] = data.integrations
         
         agent_ref.update(update_data)
         
         # Return updated agent
         return await self.get_agent(agent_id)
+    
+    async def _create_or_update_tool_for_agent(self, agent_id: str, tool_data: Dict[str, Any]) -> None:
+        """Create or update a tool for an agent with Google Sheets configuration"""
+        tool_id = tool_data['id']
+        
+        # Check if tool already exists
+        existing_tool_doc = self.db.collection('tools').document(tool_id).get()
+        
+        # Prepare tool configuration including Google Sheets data
+        tool_config = {
+            'id': tool_id,
+            'agentId': agent_id,
+            'name': tool_data.get('name', tool_id),
+            'type': tool_data.get('type', 'reference'),
+            'enabled': True,
+            'updatedAt': firestore.SERVER_TIMESTAMP,
+        }
+        
+        # Add JSON schema if present for proper parameter extraction
+        if 'json_schema' in tool_data:
+            tool_config['jsonSchema'] = tool_data['json_schema']
+        
+        # Add Google Sheets configuration if present
+        if 'googleSheetId' in tool_data:
+            tool_config['configuration'] = {
+                'googleSheetId': tool_data['googleSheetId'],
+                'googleSheetUrl': tool_data['googleSheetUrl'],
+                'googleSheetName': tool_data['googleSheetName'],
+                'columnMappings': tool_data.get('columnMappings', {}),
+                'configured': tool_data.get('configured', True)
+            }
+        
+        # Add menu items if present (for menu tools)
+        if 'menuItems' in tool_data:
+            tool_config['configuration'] = tool_config.get('configuration', {})
+            tool_config['configuration']['menuItems'] = tool_data['menuItems']
+        
+        # Handle AI-generated tools
+        if 'generatedTools' in tool_data and tool_data.get('aiEnhanced'):
+            tool_config['generatedTools'] = tool_data['generatedTools']
+            tool_config['aiEnhanced'] = True
+            tool_config['type'] = 'ai_generated'
+            
+            # Store the AI-generated tools with their complete configuration
+            for generated_tool in tool_data['generatedTools']:
+                # Each generated tool becomes a separate tool in the database
+                generated_tool_id = f"{agent_id}_{generated_tool.get('name', 'ai_tool')}"
+                generated_tool_config = {
+                    'id': generated_tool_id,
+                    'agentId': agent_id,
+                    'userId': tool_config.get('userId'),
+                    'name': generated_tool.get('name'),
+                    'displayName': generated_tool.get('displayName'),
+                    'description': generated_tool.get('description'),
+                    'type': generated_tool.get('type', 'function'),
+                    'enabled': generated_tool.get('enabled', True),
+                    'configuration': generated_tool.get('configuration', {}),
+                    'json_schema': generated_tool.get('json_schema', {}),
+                    'aiGenerated': True,
+                    'updatedAt': firestore.SERVER_TIMESTAMP
+                }
+                
+                # Check if this AI-generated tool already exists
+                generated_tool_doc = self.db.collection('tools').document(generated_tool_id).get()
+                if generated_tool_doc.exists:
+                    self.db.collection('tools').document(generated_tool_id).update(generated_tool_config)
+                else:
+                    generated_tool_config['createdAt'] = firestore.SERVER_TIMESTAMP
+                    self.db.collection('tools').document(generated_tool_id).set(generated_tool_config)
+        
+        if existing_tool_doc.exists:
+            # Update existing tool
+            self.db.collection('tools').document(tool_id).update(tool_config)
+        else:
+            # Create new tool
+            tool_config['createdAt'] = firestore.SERVER_TIMESTAMP
+            self.db.collection('tools').document(tool_id).set(tool_config)
     
     async def delete_agent(self, agent_id: str) -> bool:
         """Delete an agent"""
@@ -249,6 +354,9 @@ class FirebaseService:
                 'language': data.get('language', 'en-US'),
                 'tools': data.get('tools', []),
                 'settings': data.get('settings'),
+                'nodes': data.get('nodes'),
+                'edges': data.get('edges'),
+                'integrations': data.get('integrations'),
                 'status': data.get('status', 'active'),
                 'created_at': data.get('createdAt', datetime.utcnow()),
                 'updated_at': data.get('updatedAt', datetime.utcnow()),
@@ -332,6 +440,43 @@ class FirebaseService:
             'updated_at': data.get('updatedAt', datetime.utcnow()),
         })
     
+    async def get_tools_by_agent(self, agent_id: str) -> List[Tool]:
+        """Get all tools for a specific agent"""
+        query = self.db.collection('tools').where('agentId', '==', agent_id)
+        docs = query.stream()
+        
+        tools = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            
+            # Ensure required string fields are never None
+            name = data.get('name') or data['id']  # Fallback to ID if name is None/empty
+            user_id = data.get('userId') or ""  # Ensure user_id is never None
+            description = data.get('description') or ""
+            
+            tool = Tool(**{
+                'id': data['id'],
+                'user_id': user_id,
+                'agent_id': data.get('agentId'),
+                'name': name,
+                'display_name': data.get('displayName'),
+                'description': description,
+                'type': data.get('type', 'function'),
+                'enabled': data.get('enabled', True),
+                'configuration': data.get('configuration'),
+                'config': data.get('config'),
+                'schema': data.get('schema'),
+                'json_schema': data.get('jsonSchema'),  # Also check for jsonSchema field
+                'usage_count': data.get('usageCount', 0),
+                'last_used': data.get('lastUsed'),
+                'created_at': data.get('createdAt', datetime.utcnow()),
+                'updated_at': data.get('updatedAt', datetime.utcnow()),
+            })
+            tools.append(tool)
+        
+        return tools
+    
     async def update_tool_usage(self, tool_id: str):
         """Update tool usage statistics"""
         tool_ref = self.db.collection('tools').document(tool_id)
@@ -339,6 +484,60 @@ class FirebaseService:
             'usageCount': firestore.Increment(1),
             'lastUsed': firestore.SERVER_TIMESTAMP,
         })
+    
+    async def get_latest_google_tokens(self) -> Optional[Dict[str, str]]:
+        """Get the most recent valid Google OAuth tokens"""
+        try:
+            # Query the google_auth_tokens collection for the most recent token
+            tokens_ref = self.db.collection('google_auth_tokens')
+            
+            # First, let's see all documents in the collection
+            all_docs = list(tokens_ref.stream())
+            logger.info(f"🔧 Total documents in google_auth_tokens collection: {len(all_docs)}")
+            
+            for i, doc in enumerate(all_docs[:3]):  # Show first 3 docs
+                doc_data = doc.to_dict()
+                logger.info(f"🔧 Token doc {i+1}: ID={doc.id}, keys={list(doc_data.keys())}")
+                if 'created_at' in doc_data:
+                    logger.info(f"🔧 Created at: {doc_data['created_at']}")
+            
+            # Try the query
+            query = tokens_ref.order_by('created_at', direction=firestore.Query.DESCENDING).limit(1)
+            docs = list(query.stream())
+            logger.info(f"🔧 Query returned {len(docs)} documents")
+            
+            if not docs:
+                # Try without ordering to see if there are any docs
+                all_docs_simple = list(tokens_ref.limit(1).stream())
+                logger.info(f"🔧 Simple query returned {len(all_docs_simple)} documents")
+                if all_docs_simple:
+                    docs = all_docs_simple
+                else:
+                    logger.warning("🔧 No Google auth tokens found in google_auth_tokens collection")
+                    return None
+            
+            token_data = docs[0].to_dict()
+            logger.info(f"🔧 Retrieved token data keys: {list(token_data.keys())}")
+            logger.info(f"🔧 Access token present: {bool(token_data.get('access_token'))}")
+            logger.info(f"🔧 Refresh token present: {bool(token_data.get('refresh_token'))}")
+            
+            # Check if token is still valid (not expired)
+            import datetime
+            if token_data.get('expires_at'):
+                expires_at = datetime.datetime.fromtimestamp(token_data['expires_at'] / 1000)
+                logger.info(f"🔧 Token expires at: {expires_at}")
+                if expires_at < datetime.datetime.now():
+                    logger.warning("🔧 Google OAuth token has expired")
+                    return None
+            
+            return {
+                'access_token': token_data.get('access_token'),
+                'refresh_token': token_data.get('refresh_token')
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retrieving Google tokens: {e}")
+            return None
     
     # Call Methods
     async def create_call(self, call_data: Dict[str, Any]) -> Call:

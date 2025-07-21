@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     firebase_auth_provider_cert_url: str = Field(default=os.getenv("FIREBASE_AUTH_PROVIDER_CERT_URL", ""))
     firebase_client_cert_url: str = Field(default=os.getenv("FIREBASE_CLIENT_CERT_URL", ""))
     
+    # Google OAuth Configuration  
+    google_client_id: Optional[str] = Field(default=os.getenv("GOOGLE_CLIENT_ID"))
+    google_client_secret: Optional[str] = Field(default=os.getenv("GOOGLE_CLIENT_SECRET"))
+    
     # Agent Configuration
     agent_name: str = Field(default="phone-agent")
     max_call_duration: int = Field(default=600)  # 10 minutes

@@ -28,7 +28,9 @@ import {
   Zap,
   Users,
   Calendar,
-  MessageSquare
+  MessageSquare,
+  Workflow,
+  LayoutGrid
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -36,7 +38,11 @@ import Link from 'next/link';
 import { AgentData, BusinessData, Tool, VoiceOption } from './types';
 import BusinessDataForm from './components/BusinessDataForm';
 
-export default function EnhancedAgentBuilder() {
+interface EnhancedAgentBuilderProps {
+  onSwitchToFlow?: () => void;
+}
+
+export default function EnhancedAgentBuilder({ onSwitchToFlow }: EnhancedAgentBuilderProps) {
   const { user, getIdToken } = useAuth();
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
@@ -50,7 +56,7 @@ export default function EnhancedAgentBuilder() {
     custom_requirements: '',
     instructions: '',
     first_message: '',
-    voice: 'alloy',
+    voice: 'ash',
     language: 'en-US'
   });
   const [generatedTools, setGeneratedTools] = useState<Tool[]>([]);
@@ -66,12 +72,11 @@ export default function EnhancedAgentBuilder() {
   ];
 
   const voiceOptions: VoiceOption[] = [
-    { id: 'alloy', name: 'Alloy', description: 'Balanced, versatile voice', accent: 'American' },
-    { id: 'echo', name: 'Echo', description: 'Expressive, dynamic voice', accent: 'American' },
-    { id: 'fable', name: 'Fable', description: 'Energetic, storytelling voice', accent: 'American' },
-    { id: 'onyx', name: 'Onyx', description: 'Deep, authoritative voice', accent: 'American' },
-    { id: 'nova', name: 'Nova', description: 'Bright, clear voice', accent: 'American' },
-    { id: 'shimmer', name: 'Shimmer', description: 'Gentle, warm voice', accent: 'American' },
+    { id: 'ash', name: 'Ash', description: 'Deep, masculine voice', accent: 'American' },
+    { id: 'ballad', name: 'Ballad', description: 'British professional voice', accent: 'British' },
+    { id: 'coral', name: 'Coral', description: 'Warm, feminine voice', accent: 'American' },
+    { id: 'sage', name: 'Sage', description: 'Wise, professional voice', accent: 'American' },
+    { id: 'verse', name: 'Verse', description: 'Melodic, feminine voice', accent: 'American' },
   ];
 
   const applyTemplate = (templateId: string) => {
@@ -123,18 +128,20 @@ export default function EnhancedAgentBuilder() {
       const token = await getIdToken();
       const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8000';
       
-      const response = await fetch(`${serverUrl}/api/tools/generate-smart`, {
+      const response = await fetch(`/api/tools/generate`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          business_type: agentData.business_type,
-          business_name: agentData.business_name,
-          business_description: agentData.business_description,
-          requirements: agentData.custom_requirements || '',
-          additional_data: businessData,
+          businessData: {
+            name: agentData.business_name,
+            type: agentData.business_type,
+            description: agentData.business_description,
+            requirements: agentData.custom_requirements || ''
+          },
+          toolConfiguration: businessData
         }),
       });
 
@@ -159,19 +166,21 @@ export default function EnhancedAgentBuilder() {
       const token = await getIdToken();
       const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8000';
       
-      // First, generate smart tools
-      const toolsResponse = await fetch(`${serverUrl}/api/tools/generate-smart`, {
+      // First, generate smart tools using the new simplified API
+      const toolsResponse = await fetch(`/api/tools/generate`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          business_type: agentData.business_type,
-          business_name: agentData.business_name,
-          business_description: agentData.business_description,
-          requirements: agentData.custom_requirements || '',
-          additional_data: businessData,
+          businessData: {
+            name: agentData.business_name,
+            type: agentData.business_type,
+            description: agentData.business_description,
+            requirements: agentData.custom_requirements || ''
+          },
+          toolConfiguration: businessData
         }),
       });
 
@@ -247,6 +256,29 @@ export default function EnhancedAgentBuilder() {
                 Back to Dashboard
               </Button>
             </Link>
+            
+            {/* View Mode Toggle */}
+            {onSwitchToFlow && (
+              <div className="flex gap-1 bg-slate-800/90 backdrop-blur-xl p-1 rounded-lg border border-gray-700">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onSwitchToFlow}
+                  className="text-white hover:bg-white/10"
+                >
+                  <Workflow className="w-4 h-4 mr-2" />
+                  Visual Builder
+                </Button>
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="bg-blue-500 hover:bg-blue-600 text-white"
+                >
+                  <LayoutGrid className="w-4 h-4 mr-2" />
+                  Classic Form
+                </Button>
+              </div>
+            )}
           </div>
           
           <div className="text-center">
@@ -317,7 +349,14 @@ export default function EnhancedAgentBuilder() {
                       <Label className="text-white">Business Name</Label>
                       <Input
                         value={agentData.business_name}
-                        onChange={(e) => setAgentData({ ...agentData, business_name: e.target.value })}
+                        onChange={(e) => {
+                          const newBusinessName = e.target.value;
+                          setAgentData(prev => ({
+                            ...prev,
+                            business_name: newBusinessName,
+                            first_message: prev.first_message?.replace(/{businessName}/g, newBusinessName) || prev.first_message
+                          }));
+                        }}
                         placeholder="e.g., Ahmed's Pizza"
                         className="bg-slate-800/50 border-gray-700/50 text-white placeholder:text-white/40 focus:border-blue-400"
                       />

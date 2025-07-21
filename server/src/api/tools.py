@@ -97,3 +97,46 @@ async def generate_smart_tools(request: GenerateToolsRequest):
     except Exception as e:
         logger.error(f"Error generating smart tools: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class BusinessData(BaseModel):
+    name: str
+    type: str
+    description: str
+    requirements: Optional[str] = None
+
+
+class GenerateToolsSimpleRequest(BaseModel):
+    businessData: BusinessData
+    toolConfiguration: Optional[Dict[str, Any]] = None
+
+
+@router.post("/generate")
+async def generate_tools(request: GenerateToolsSimpleRequest):
+    """Generate AI tools with a simplified interface for frontend consumption"""
+    from ..services.tool_generator import tool_generator_service
+    
+    try:
+        # Transform the simplified request to the full format expected by the service
+        full_request = GenerateToolsRequest(
+            business_type=request.businessData.type,
+            business_name=request.businessData.name,
+            business_description=request.businessData.description,
+            requirements=request.businessData.requirements or "Generate tools suitable for this business",
+            file_analysis_results=None,
+            additional_data=request.toolConfiguration or {}
+        )
+        
+        tools = await tool_generator_service.generate_smart_tools(
+            business_type=full_request.business_type,
+            business_name=full_request.business_name,
+            business_description=full_request.business_description,
+            requirements=full_request.requirements,
+            file_analysis_results=full_request.file_analysis_results,
+            additional_data=full_request.additional_data,
+        )
+        
+        return {"tools": tools}
+    except Exception as e:
+        logger.error(f"Error generating tools: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
