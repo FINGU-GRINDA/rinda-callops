@@ -2,16 +2,18 @@ import asyncio
 import json
 import logging
 from typing import Optional, Dict, Any, Annotated
-from datetime import datetime
 from time import perf_counter
 
 from livekit import agents, rtc, api
-from livekit.agents import llm, AutoSubscribe, JobContext, WorkerOptions, cli
-from livekit.plugins import openai, deepgram, cartesia, silero
+from livekit.agents import llm, AutoSubscribe, JobContext, WorkerOptions, cli, AgentSession, Agent, RoomInputOptions
+from livekit.plugins import openai, deepgram, cartesia, silero, noise_cancellation
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from ..core.config import settings
-from ..models import Agent, Call, CallStatus, Tool
+from ..core.voice_config import get_cartesia_voice, get_cartesia_language_code
+from ..models import Agent as AgentModel, Tool
 from ..services.tool_executor import ToolExecutor
+# from .custom_tts import PreprocessedTTS  # TODO: Fix this to properly inherit from TTS
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +27,9 @@ class CallActions(llm.ToolContext):
         api: api.LiveKitAPI,
         participant: rtc.RemoteParticipant,
         room: rtc.Room,
-        agent_config: Agent,
+        agent_config: AgentModel,
         tool_executor: ToolExecutor,
+        preloaded_tools: Optional[Dict[str, Any]] = None,
     ):
         # Store instance variables first
         self.api = api
@@ -34,16 +37,25 @@ class CallActions(llm.ToolContext):
         self.room = room
         self.agent_config = agent_config
         self.tool_executor = tool_executor
+        self.preloaded_tools = preloaded_tools or {}
         
         # Build custom tools from agent configuration (loaded from DB)
         tools = []
         
         if agent_config.tools:
+            logger.info(f"Loading {len(agent_config.tools)} tools for agent {agent_config.name}")
             for tool_id in agent_config.tools:
                 # Create a dynamic tool function for each configured tool from DB
-                dynamic_tool = self._create_dynamic_tool(tool_id)
+                tool_info = self.preloaded_tools.get(tool_id)
+                dynamic_tool = self._create_dynamic_tool(tool_id, tool_info)
                 if dynamic_tool:
                     tools.append(dynamic_tool)
+                    tool_name = tool_info.name if tool_info else tool_id
+                    logger.info(f"✓ Loaded tool: {tool_name} ({tool_id})")
+                else:
+                    logger.warning(f"✗ Failed to load tool: {tool_id}")
+        else:
+            logger.warning(f"No tools configured for agent {agent_config.name}")
         
         # Initialize parent with tools
         super().__init__(tools=tools)
@@ -99,37 +111,42 @@ class CallActions(llm.ToolContext):
         logger.info(f"detected answering machine for {self.participant.identity}")
         await self.hangup()
 
-    def _create_dynamic_tool(self, tool_id: str):
+    def _create_dynamic_tool(self, tool_id: str, tool_info: Optional[Any] = None):
         """Create a dynamic tool function from tool configuration loaded from DB"""
         try:
+            logger.debug(f"Creating dynamic tool for ID: {tool_id}")
+            
             # Create a closure to capture tool_id
             def make_tool_func(captured_tool_id: str):
-                async def tool_func(
-                    parameters: Annotated[str, "JSON string of parameters for the tool"]
-                ):
-                    """Execute a custom tool with the provided parameters"""
+                async def tool_func():
+                    """Execute a custom tool without parameters"""
                     try:
-                        # Parse the parameters
-                        params = json.loads(parameters) if isinstance(parameters, str) else parameters
+                        # No parameters needed for menu tools
+                        params = {}
                         
                         # Get tool info
                         tool = await self.tool_executor.get_tool(captured_tool_id)
                         if not tool:
+                            logger.error(f"Tool {captured_tool_id} not found in database")
                             return {"error": f"Tool {captured_tool_id} not found"}
                         
-                        logger.info(f"Executing tool {tool.name} ({captured_tool_id}) with parameters: {params}")
+                        logger.info(f"Executing tool: {tool.name} ({captured_tool_id})")
+                        logger.info(f"Tool type: {tool.type}")
+                        logger.info(f"Tool description: {tool.description}")
+                        logger.info(f"Tool parameters: {params}")
                         
                         # Execute the tool
                         result = await self.tool_executor.execute(captured_tool_id, params)
                         
                         if result.success:
+                            logger.info(f"Tool {tool.name} returned successfully")
+                            logger.info(f"Tool result type: {type(result.result)}")
+                            logger.info(f"Tool result: {result.result}")
                             return result.result
                         else:
+                            logger.error(f"Tool {tool.name} failed: {result.error}")
                             return {"error": result.error}
                             
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Invalid JSON parameters for tool {captured_tool_id}: {e}")
-                        return {"error": "Invalid parameter format. Please provide valid JSON."}
                     except Exception as e:
                         logger.error(f"Error executing tool {captured_tool_id}: {e}")
                         return {"error": f"Tool execution failed: {str(e)}"}
@@ -137,15 +154,24 @@ class CallActions(llm.ToolContext):
                 # Set unique function name before returning
                 func_name = f"tool_{captured_tool_id.replace('-', '_')}"
                 tool_func.__name__ = func_name
-                tool_func.__doc__ = f"Execute tool {captured_tool_id}"
+                # Create a more descriptive docstring
+                tool_func.__doc__ = f"Execute tool {captured_tool_id}. Call this tool to retrieve information."
                 
                 return tool_func
             
             # Create the function with unique name
             dynamic_func = make_tool_func(tool_id)
             
-            # Apply the decorator and return
-            return llm.function_tool(dynamic_func)
+            # Apply the decorator with proper name and description
+            if tool_info:
+                # Create a clear, unambiguous description
+                tool_func = llm.function_tool(
+                    name=tool_info.name,
+                    description=tool_info.description
+                )(dynamic_func)
+                return tool_func
+            else:
+                return llm.function_tool(dynamic_func)
             
         except Exception as e:
             logger.error(f"Error creating dynamic tool for {tool_id}: {e}")
@@ -165,19 +191,13 @@ class CallActions(llm.ToolContext):
 async def run_multimodal_agent(
     ctx: JobContext,
     participant: rtc.RemoteParticipant,
-    agent_config: Agent,
+    agent_config: AgentModel,
     tool_executor: ToolExecutor,
 ):
-    """Run the multimodal agent using OpenAI's realtime API"""
+    """Run the multimodal agent using STT-LLM-TTS pipeline with turn detection"""
     
-    logger.info("starting multimodal agent")
-
-    # Create OpenAI Realtime model with basic parameters
-    model = openai.realtime.RealtimeModel(
-        voice=agent_config.voice if isinstance(agent_config.voice, str) else "alloy",
-        temperature=0.8,
-        modalities=["text", "audio"],
-    )
+    logger.info("starting multimodal agent with STT-LLM-TTS pipeline")
+    logger.info(f"Agent config: name={agent_config.name}, language={agent_config.language}, voice={agent_config.voice}")
 
     fnc_ctx = CallActions(
         api=ctx.api,
@@ -187,8 +207,43 @@ async def run_multimodal_agent(
         tool_executor=tool_executor,
     )
 
-    # Get system prompt and initial message
-    system_prompt = agent_config.system_prompt or "You are a helpful AI assistant."
+    # Get instructions and initial message
+    instructions = agent_config.instructions or "You are a helpful AI assistant."
+    
+    # Add tool usage instructions to reduce hallucination
+    tool_instructions = """
+
+CRITICAL INSTRUCTIONS FOR TOOL USAGE AND NATURAL RESPONSES:
+
+1. ONLY use tools when the customer EXPLICITLY asks for specific information.
+2. DO NOT proactively provide information that wasn't requested.
+3. NEVER call tools during greetings or unless directly asked.
+
+4. Examples of when to use tools:
+   - Customer asks: "What are your hours?" → Use suitable tool
+   - Customer asks: "What's on the menu?" → Use suitable tool
+   - Customer asks: "How much is a pizza?" → Use suitable tool
+
+5. Examples of when NOT to use tools:
+   - Initial greeting
+   - Customer says: "Hello" or "Hi"
+   - Customer says: "I'd like to order" (wait for them to ask about specific items)
+
+6. CONVERSATIONAL RESPONSE STYLE:
+   - When you receive data from a tool, DO NOT just read it robotically
+   - Introduce the information naturally: "Great question! Let me tell you about our menu..."
+   - Use conversational transitions: "We have...", "Our most popular items are...", "You might enjoy..."
+   - Add helpful context: "Our customers really love the...", "A popular choice is..."
+   - Be warm and engaging, not just informative
+   - Speak like a friendly restaurant employee, not a computer
+
+7. Example natural responses:
+   - Instead of: "Here's our menu: Pizza $12.99, Pasta $10.99"
+   - Say: "We have some delicious options today! Our pizzas start at $12.99, and we also have fresh pasta dishes from $10.99. What sounds good to you?"
+
+8. NEVER make up information. If asked about something you don't have a tool for, say "Let me check on that for you" or "I'll need to verify that information."
+"""
+    instructions = f"{instructions}{tool_instructions}"
     
     # Add language instruction to system prompt if language is specified
     if agent_config.language:
@@ -203,64 +258,124 @@ async def run_multimodal_agent(
             "ko-KR": "Korean",
             "zh-CN": "Chinese"
         }.get(agent_config.language, "English")
-        system_prompt = f"{system_prompt}\n\nIMPORTANT: Always respond in {language_name} only."
+        instructions = f"{instructions}\n\nIMPORTANT: Always respond in {language_name} only."
     
     initial_message = agent_config.first_message or agent_config.greeting or "Hello! How can I help you today?"
     
     # Create the agent with instructions
-    agent = agents.Agent(
-        instructions=system_prompt,
+    agent = Agent(
+        instructions=instructions,
         tools=fnc_ctx._tools if hasattr(fnc_ctx, '_tools') else []
     )
     
-    # Create the session with the model
-    session = agents.AgentSession(
-        vad=silero.VAD.load(),  # Voice Activity Detection
-        stt=deepgram.STT(),  # Speech-to-text
-        llm=model,  # Our OpenAI Realtime model
-        tts=openai.TTS(),  # Text-to-speech
+    # Use multi for all non-English languages as Deepgram supports automatic detection
+    deepgram_language = "en" if agent_config.language == "en-US" else "multi"
+    
+    # Get appropriate voice for the language
+    if agent_config.voice and isinstance(agent_config.voice, str) and agent_config.voice.startswith(("794", "a0e", "f78", "c79")):
+        # If a specific Cartesia voice ID is provided, use it
+        voice_id = agent_config.voice
+    else:
+        # Import the mapping
+        from ..core.voice_config import OPENAI_TO_CARTESIA_MAPPING
+        
+        # Map OpenAI voices to Cartesia voice types
+        if agent_config.voice in OPENAI_TO_CARTESIA_MAPPING:
+            voice_type = OPENAI_TO_CARTESIA_MAPPING[agent_config.voice]
+        elif agent_config.voice in ["male", "female", "professional"]:
+            voice_type = agent_config.voice
+        else:
+            voice_type = "default"
+        
+        voice_id = get_cartesia_voice(agent_config.language or "en-US", voice_type)
+    
+    logger.info(f"Selected Cartesia voice: {voice_id} (type: {voice_type}) for language: {agent_config.language}")
+    
+    # Create TTS directly without preprocessing wrapper for now
+    # TODO: Fix PreprocessedTTS to properly inherit from TTS
+    try:
+        # Check if Cartesia API key is available
+        if not settings.cartesia_api_key:
+            logger.warning("Cartesia API key not found, falling back to OpenAI TTS")
+            tts = openai.TTS(
+                model="tts-1",
+                voice=agent_config.voice or "alloy"
+            )
+            logger.info(f"Using OpenAI TTS with voice: {agent_config.voice or 'alloy'}")
+        else:
+            tts = cartesia.TTS(
+                model="sonic-2", 
+                voice=voice_id,
+                language=get_cartesia_language_code(agent_config.language or "en-US")
+            )
+            logger.info("Cartesia TTS created successfully")
+    except Exception as e:
+        logger.error(f"Failed to create TTS: {e}")
+        # Try OpenAI as fallback
+        try:
+            logger.info("Falling back to OpenAI TTS due to Cartesia error")
+            tts = openai.TTS(
+                model="tts-1",
+                voice=agent_config.voice or "alloy"
+            )
+        except Exception as e2:
+            logger.error(f"Failed to create OpenAI TTS as well: {e2}")
+            raise
+    
+    # Create the session with STT-LLM-TTS pipeline
+    session = AgentSession(
+        stt=deepgram.STT(model="nova-3", language=deepgram_language),
+        llm=openai.LLM(model="gpt-4o-mini"),
+        tts=tts,
+        vad=silero.VAD.load(),
+        turn_detection=MultilingualModel(),
     )
     
-    # Start the session
-    await session.start(agent=agent, room=ctx.room)
+    # Start the session with noise cancellation if available
+    logger.info("Starting agent session...")
+    try:
+        await session.start(
+            room=ctx.room,
+            agent=agent,
+            room_input_options=RoomInputOptions(
+                noise_cancellation=noise_cancellation.BVC(),
+            ),
+        )
+        logger.info("Agent session started with noise cancellation")
+    except Exception as e:
+        logger.warning(f"Could not enable noise cancellation: {e}")
+        # Don't try to start again if already started
+        if "activity is already running" not in str(e):
+            try:
+                await session.start(
+                    room=ctx.room,
+                    agent=agent,
+                )
+                logger.info("Agent session started without noise cancellation")
+            except Exception as e2:
+                logger.error(f"Failed to start session: {e2}")
+                raise
     
     # Send initial greeting
-    await session.generate_reply(instructions=initial_message)
+    logger.info(f"Sending initial greeting: {initial_message}")
+    try:
+        await session.generate_reply(instructions=initial_message)
+        logger.info("Initial greeting sent successfully")
+    except Exception as e:
+        logger.error(f"Failed to send initial greeting: {e}")
     
-    logger.info(f"Agent started with system prompt: {system_prompt[:100]}...")  # Log first 100 chars
+    logger.info(f"Agent started with instructions: {instructions[:100]}...")  # Log first 100 chars
 
 
-def run_voice_pipeline_agent(
+async def run_voice_pipeline_agent(
     ctx: JobContext,
     participant: rtc.RemoteParticipant,
-    agent_config: Agent,
+    agent_config: AgentModel,
     tool_executor: ToolExecutor,
 ):
-    """Run the voice pipeline agent for more control over STT/TTS"""
+    """Run the voice pipeline agent using STT-LLM-TTS with turn detection"""
     
-    logger.info("starting voice pipeline agent")
-
-    # Set up STT (Speech-to-Text)
-    stt = deepgram.STT(
-        api_key=settings.deepgram_api_key,
-        model="nova-2",
-        language=agent_config.language or "en-US",
-    )
-
-    # Set up LLM
-    llm_model = openai.LLM(
-        model="gpt-4o",
-        api_key=settings.openai_api_key,
-    )
-
-    # Set up TTS (Text-to-Speech)
-    voice_id = agent_config.voice if isinstance(agent_config.voice, str) else "alloy"
-    
-    # For now, always use OpenAI TTS since voice is just a string
-    tts = openai.TTS(
-        api_key=settings.openai_api_key,
-        voice=voice_id,
-    )
+    logger.info("starting voice pipeline agent with STT-LLM-TTS")
 
     fnc_ctx = CallActions(
         api=ctx.api,
@@ -270,24 +385,144 @@ def run_voice_pipeline_agent(
         tool_executor=tool_executor,
     )
 
-    agent = agents.voice_pipeline.VoicePipelineAgent(
-        stt=stt,
-        llm=llm_model,
-        tts=tts,
-        fnc_ctx=fnc_ctx,
-        initial_ctx=llm.ChatContext().append(
-            role="system",
-            text=agent_config.system_prompt or "You are a helpful AI assistant.",
-        ),
-        before_llm_cb=lambda ctx: ctx,
-        after_llm_cb=lambda ctx: ctx,
-    )
+    # Get instructions and initial message
+    instructions = agent_config.instructions or "You are a helpful AI assistant."
+    
+    # Add tool usage instructions to reduce hallucination
+    tool_instructions = """
 
-    agent.start(ctx.room, participant)
-
-    # Initial greeting
+CRITICAL INSTRUCTIONS FOR TOOL USAGE:
+1. ONLY use tools when the customer EXPLICITLY asks for specific information.
+2. DO NOT proactively provide information that wasn't requested.
+3. NEVER call tools during greetings or unless directly asked.
+4. Examples of when to use tools:
+   - Customer asks: "What are your hours?" → Use suitable tool
+   - Customer asks: "What's on the menu?" → Use suitable tool
+   - Customer asks: "How much is a pizza?" → Use suitable tool
+5. Examples of when NOT to use tools:
+   - Initial greeting
+   - Customer says: "Hello" or "Hi"
+   - Customer says: "I'd like to order" (wait for them to ask about specific items)
+6. NEVER make up information. If asked about something you don't have a tool for, say you'll need to check.
+"""
+    instructions = f"{instructions}{tool_instructions}"
+    
+    # Add language instruction to system prompt if language is specified
+    if agent_config.language:
+        language_name = {
+            "en-US": "English",
+            "es-ES": "Spanish",
+            "fr-FR": "French",
+            "de-DE": "German",
+            "it-IT": "Italian",
+            "pt-BR": "Portuguese",
+            "ja-JP": "Japanese",
+            "ko-KR": "Korean",
+            "zh-CN": "Chinese"
+        }.get(agent_config.language, "English")
+        instructions = f"{instructions}\n\nIMPORTANT: Always respond in {language_name} only."
+    
     initial_message = agent_config.first_message or agent_config.greeting or "Hello! How can I help you today?"
-    asyncio.create_task(agent.say(initial_message, allow_interruptions=True))
+    
+    # Create the agent with instructions
+    agent = Agent(
+        instructions=instructions,
+        tools=fnc_ctx._tools if hasattr(fnc_ctx, '_tools') else []
+    )
+    
+    # Use multi for all non-English languages as Deepgram supports automatic detection
+    deepgram_language = "en" if agent_config.language == "en-US" else "multi"
+    
+    # Get appropriate voice for the language
+    if agent_config.voice and isinstance(agent_config.voice, str) and agent_config.voice.startswith(("794", "a0e", "f78", "c79")):
+        # If a specific Cartesia voice ID is provided, use it
+        voice_id = agent_config.voice
+    else:
+        # Import the mapping
+        from ..core.voice_config import OPENAI_TO_CARTESIA_MAPPING
+        
+        # Map OpenAI voices to Cartesia voice types
+        if agent_config.voice in OPENAI_TO_CARTESIA_MAPPING:
+            voice_type = OPENAI_TO_CARTESIA_MAPPING[agent_config.voice]
+        elif agent_config.voice in ["male", "female", "professional"]:
+            voice_type = agent_config.voice
+        else:
+            voice_type = "default"
+        
+        voice_id = get_cartesia_voice(agent_config.language or "en-US", voice_type)
+    
+    logger.info(f"Selected Cartesia voice: {voice_id} (type: {voice_type}) for language: {agent_config.language}")
+    
+    # Create TTS directly without preprocessing wrapper for now
+    # TODO: Fix PreprocessedTTS to properly inherit from TTS
+    try:
+        # Check if Cartesia API key is available
+        if not settings.cartesia_api_key:
+            logger.warning("Cartesia API key not found, falling back to OpenAI TTS")
+            tts = openai.TTS(
+                model="tts-1",
+                voice=agent_config.voice or "alloy"
+            )
+            logger.info(f"Using OpenAI TTS with voice: {agent_config.voice or 'alloy'}")
+        else:
+            tts = cartesia.TTS(
+                model="sonic-2", 
+                voice=voice_id,
+                language=get_cartesia_language_code(agent_config.language or "en-US")
+            )
+            logger.info("Cartesia TTS created successfully")
+    except Exception as e:
+        logger.error(f"Failed to create TTS: {e}")
+        # Try OpenAI as fallback
+        try:
+            logger.info("Falling back to OpenAI TTS due to Cartesia error")
+            tts = openai.TTS(
+                model="tts-1",
+                voice=agent_config.voice or "alloy"
+            )
+        except Exception as e2:
+            logger.error(f"Failed to create OpenAI TTS as well: {e2}")
+            raise
+    
+    # Create the session with STT-LLM-TTS pipeline
+    session = AgentSession(
+        stt=deepgram.STT(model="nova-3", language=deepgram_language),
+        llm=openai.LLM(model="gpt-4o-mini"),
+        tts=tts,
+        vad=silero.VAD.load(),
+        turn_detection=MultilingualModel(),
+    )
+    
+    # Start the session with noise cancellation
+    try:
+        await session.start(
+            room=ctx.room,
+            agent=agent,
+            room_input_options=RoomInputOptions(
+                noise_cancellation=noise_cancellation.BVC(),
+            ),
+        )
+        logger.info("Agent session started with noise cancellation")
+    except Exception as e:
+        logger.warning(f"Could not enable noise cancellation: {e}")
+        # Don't try to start again if already started
+        if "activity is already running" not in str(e):
+            try:
+                await session.start(
+                    room=ctx.room,
+                    agent=agent,
+                )
+                logger.info("Agent session started without noise cancellation")
+            except Exception as e2:
+                logger.error(f"Failed to start session: {e2}")
+                raise
+    
+    await ctx.connect()
+    
+    # Send initial greeting
+    await session.generate_reply(instructions=initial_message)
+    
+    logger.info(f"Voice pipeline agent started with instructions: {instructions[:100]}...")
 
 
 async def wait_for_participant_answer(
@@ -352,30 +587,21 @@ async def entrypoint(ctx: JobContext):
         agent_id = metadata.get("agent_id") if isinstance(metadata, dict) else None
         logger.info(f"Extracted agent_id from job metadata: {agent_id}")
     
-    if agent_id:
-        # Load agent configuration from database
-        from ..services.database import db_service
-        agent_config = await db_service.get_agent(agent_id)
-        
-        if not agent_config:
-            logger.error(f"Agent {agent_id} not found in database")
-            ctx.shutdown()
-            return
-    else:
-        # Use default agent configuration for auto-dispatch
-        logger.info("No agent_id provided, using default configuration")
-        from ..models.agent import Agent
-        agent_config = Agent(
-            id="default",
-            user_id="system",
-            name="Default Phone Agent",
-            system_prompt="You are a helpful AI assistant. Keep responses brief and conversational.",
-            first_message="Hello! How can I help you today?",
-            voice="alloy",
-            language="en-US",
-            tools=[],
-            workflows=[],
-        )
+    if not agent_id:
+        logger.error("No agent_id provided in metadata")
+        ctx.shutdown()
+        return
+    
+    # Load agent configuration from database
+    from ..services.database import db_service
+    agent_config = await db_service.get_agent(agent_id)
+    
+    if not agent_config:
+        logger.error(f"Agent {agent_id} not found in database")
+        ctx.shutdown()
+        return
+    
+    logger.info(f"Agent config loaded: name={agent_config.name}, instructions={agent_config.instructions[:50] if agent_config.instructions else 'None'}...")
 
     # Initialize tool executor
     tool_executor = ToolExecutor()
@@ -436,7 +662,7 @@ async def entrypoint(ctx: JobContext):
             use_voice_pipeline = job_metadata.get("use_voice_pipeline", False)
     
     if use_voice_pipeline:
-        run_voice_pipeline_agent(ctx, participant, agent_config, tool_executor)
+        await run_voice_pipeline_agent(ctx, participant, agent_config, tool_executor)
     else:
         await run_multimodal_agent(ctx, participant, agent_config, tool_executor)
 

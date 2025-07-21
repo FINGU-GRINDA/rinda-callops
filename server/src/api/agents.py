@@ -83,6 +83,19 @@ async def update_agent(
     return agent
 
 
+@router.put("/{agent_id}", response_model=Agent)
+async def update_agent_put(
+    agent_id: str,
+    request: UpdateAgentRequest,
+    db: FirebaseService = Depends(get_db),
+):
+    """Update an agent (PUT method)"""
+    agent = await db.update_agent(agent_id, request)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
 @router.delete("/{agent_id}")
 async def delete_agent(
     agent_id: str,

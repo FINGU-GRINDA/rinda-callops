@@ -206,8 +206,19 @@ class ToolExecutor:
     
     async def _execute_function(self, tool: Tool, parameters: Dict[str, Any]) -> Any:
         """Execute a custom function"""
-        # This would execute predefined functions based on tool configuration
-        raise NotImplementedError("Custom functions not implemented yet")
+        # For function-type tools, return the stored configuration data
+        # This is typically used for menu information, business hours, etc.
+        
+        if tool.configuration:
+            logger.info(f"Returning stored configuration for function tool: {tool.name}")
+            return tool.configuration
+        
+        # If no configuration is stored, return a helpful message
+        return {
+            "message": f"No data configured for {tool.name}",
+            "tool_type": tool.type,
+            "description": tool.description
+        }
     
     async def _update_tool_usage(self, tool_id: str):
         """Update tool usage statistics"""

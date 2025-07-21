@@ -111,7 +111,7 @@ class FirebaseService:
             'description': agent_data.get('description'),
             'business_type': agent_data.get('businessType'),
             'phone_number': agent_data.get('phoneNumber'),
-            'system_prompt': agent_data.get('systemPrompt'),
+            'instructions': agent_data.get('systemPrompt'),
             'greeting': agent_data.get('greeting'),
             'first_message': agent_data.get('firstMessage'),
             'voice': agent_data.get('voice'),
@@ -142,7 +142,7 @@ class FirebaseService:
             'description': data.get('description'),
             'business_type': data.get('businessType'),
             'phone_number': data.get('phoneNumber'),
-            'system_prompt': data.get('systemPrompt'),
+            'instructions': data.get('systemPrompt'),
             'greeting': data.get('greeting'),
             'first_message': data.get('firstMessage'),
             'voice': data.get('voice'),
@@ -187,13 +187,13 @@ class FirebaseService:
         if data.first_message is not None:
             update_data['firstMessage'] = data.first_message
         if data.voice is not None:
-            update_data['voice'] = data.voice.dict()
+            update_data['voice'] = data.voice
         if data.language is not None:
             update_data['language'] = data.language
         if data.tools is not None:
             update_data['tools'] = data.tools
         if data.settings is not None:
-            update_data['settings'] = data.settings.dict()
+            update_data['settings'] = data.settings.dict() if hasattr(data.settings, 'dict') else data.settings
         if data.status is not None:
             update_data['status'] = data.status
         
@@ -242,7 +242,7 @@ class FirebaseService:
                 'description': data.get('description'),
                 'business_type': data.get('businessType'),
                 'phone_number': data.get('phoneNumber'),
-                'system_prompt': data.get('systemPrompt'),
+                'instructions': data.get('systemPrompt'),
                 'greeting': data.get('greeting'),
                 'first_message': data.get('firstMessage'),
                 'voice': data.get('voice'),
@@ -356,6 +356,19 @@ class FirebaseService:
         call_data['updatedAt'] = datetime.utcnow()
         
         return Call(**call_data)
+    
+    async def get_call(self, call_id: str) -> Optional[Call]:
+        """Get a call by ID"""
+        call_ref = self.db.collection('calls').document(call_id)
+        doc = call_ref.get()
+        
+        if not doc.exists:
+            return None
+        
+        data = doc.to_dict()
+        data['id'] = doc.id
+        
+        return Call(**data)
     
     async def update_call(self, call_id: str, update_data: Dict[str, Any]) -> Optional[Call]:
         """Update a call record"""

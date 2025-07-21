@@ -45,7 +45,7 @@ class Agent(BaseModel):
     business_type: Optional[str] = None
     phone_number_id: Optional[str] = None
     phone_number: Optional[str] = None
-    system_prompt: Optional[str] = None
+    instructions: Optional[str] = None
     greeting: Optional[str] = None
     first_message: Optional[str] = None
     voice: Optional[str] = None
@@ -88,7 +88,7 @@ class CreateAgentRequest(BaseModel):
     business_description: Optional[str] = None
     custom_requirements: Optional[str] = None
     phone_number: Optional[str] = None
-    instructions: Optional[str] = None  # Changed from system_prompt
+    instructions: Optional[str] = None
     first_message: Optional[str] = None
     voice: Optional[str] = None  # Changed to string to match frontend
     language: str = "en-US"

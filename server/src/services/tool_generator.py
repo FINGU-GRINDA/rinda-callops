@@ -131,6 +131,13 @@ TOOL DESIGN PRINCIPLES:
 - Use descriptive parameter names that are self-documenting
 - Include detailed descriptions for both the tool and each parameter
 
+CRITICAL RULES FOR TOOL DESCRIPTIONS:
+1. ALWAYS include "USE THIS TOOL ONLY WHEN:" followed by specific trigger phrases
+2. ALWAYS include "DO NOT USE THIS TOOL WHEN:" followed by negative examples
+3. Information retrieval tools (provide_menu, check_hours) should NEVER be used for actions
+4. Action tools (take_order, book_appointment) should NEVER be used for information queries
+5. Be EXTREMELY explicit about the difference between browsing/asking vs. acting/ordering
+
 PARAMETER TYPE GUIDELINES:
 - Use "string" for text values (names, dates, times, selections)
 - Use "number" for numeric values (quantities, prices, counts)
@@ -138,6 +145,17 @@ PARAMETER TYPE GUIDELINES:
 - Use "array" for multiple selections (with items schema)
 - Use "object" for nested structures (with properties schema)
 - Always include "enum" arrays when there are specific valid options
+
+IMPORTANT CONFIGURATION REQUIREMENT:
+For tools that provide information (like menu, hours, prices), include a "configuration" field with the actual data that will be returned when the tool is called. The tool should NOT make external calls - it should return the data stored in its configuration.
+
+NATURAL RESPONSE FORMATTING:
+When creating the "response" field in tool configurations, format it conversationally:
+- Start with a friendly introduction: "I'd be happy to help you with that!"
+- Present information naturally, not as a list dump
+- Use transitions like "We offer...", "Our options include..."
+- Break up long lists with contextual phrases
+- End with an engaging question: "What sounds good to you?" or "Would you like to hear more about any of these?"
 
 OUTPUT FORMAT (JSON only, no explanation):
 {{
@@ -147,6 +165,12 @@ OUTPUT FORMAT (JSON only, no explanation):
       "displayName": "Human Readable Name",
       "description": "Detailed description explaining when and how the AI should use this tool",
       "type": "function",
+      "configuration": {{
+        // For information retrieval tools, include the actual data here
+        // This data will be returned when the tool is called
+        "response": "The formatted response to return",
+        "data": {{ /* actual business data */ }}
+      }},
       "json_schema": {{
         "type": "object",
         "properties": {{
@@ -167,11 +191,42 @@ OUTPUT FORMAT (JSON only, no explanation):
   ]
 }}
 
-EXAMPLE OF A WELL-FORMED TOOL:
+CRITICAL INSTRUCTION: Make tool descriptions EXTREMELY SPECIFIC about when to use them vs when NOT to use them. Include explicit trigger phrases and negative examples to prevent confusion.
+
+EXAMPLES OF WELL-FORMED TOOLS WITH ULTRA-CLEAR DESCRIPTIONS:
+
+1. Information retrieval tool (NO parameters, just returns data):
 {{
-  "name": "create_reservation",
-  "displayName": "Create Restaurant Reservation",
-  "description": "Creates a table reservation when the customer wants to book a table. Use this after confirming availability.",
+  "name": "provide_menu",
+  "displayName": "Provide Menu Information",
+  "description": "Returns the complete restaurant menu with all items and prices. USE THIS TOOL ONLY WHEN: customer asks 'What's on the menu?', 'What food do you have?', 'What can I order?', 'Do you have pizza?', 'How much does X cost?', 'What are your prices?'. DO NOT USE THIS TOOL WHEN: customer wants to place an order, customer says 'I want to order', customer is ready to purchase, or any other action besides viewing the menu.",
+  "type": "function",
+  "configuration": {{
+    "response": "I'd be happy to tell you about our delicious menu! We have several fantastic pizzas to choose from. Our classic Margherita is $12.99 - it's made with fresh mozzarella, tomatoes, and basil. The Pepperoni pizza is always popular at $14.99, and if you're feeling adventurous, we have a Hawaiian with ham and pineapple for $15.99. For drinks, we offer Coke and Sprite at $2.99 each, or fresh orange juice for $3.99. What sounds good to you today?",
+    "menu_items": [
+      {{"name": "Margherita Pizza", "price": 12.99, "description": "Classic pizza with fresh mozzarella, tomatoes, and basil"}},
+      {{"name": "Pepperoni Pizza", "price": 14.99, "description": "Traditional pepperoni with mozzarella cheese"}},
+      {{"name": "Hawaiian Pizza", "price": 15.99, "description": "Ham and pineapple with mozzarella"}}
+    ],
+    "drinks": [
+      {{"name": "Coke", "price": 2.99}},
+      {{"name": "Sprite", "price": 2.99}},
+      {{"name": "Orange Juice", "price": 3.99}}
+    ]
+  }},
+  "json_schema": {{
+    "type": "object",
+    "properties": {{}},
+    "required": [],
+    "additionalProperties": false
+  }}
+}}
+
+2. Action tool for placing orders (WITH parameters):
+{{
+  "name": "take_order",
+  "displayName": "Take Customer Order",
+  "description": "Processes a customer's order after they have decided what to purchase. USE THIS TOOL ONLY WHEN: customer says 'I want to order X', 'I'll have the X', 'Can I get X', 'I'd like to purchase X', or explicitly states they want to place an order. DO NOT USE THIS TOOL WHEN: customer is asking about menu items, prices, or just browsing options. Always use provide_menu tool first if customer needs to see options.",
   "type": "function",
   "json_schema": {{
     "type": "object",
@@ -264,7 +319,8 @@ Generate tools that would impress customers with their intelligence and business
                     "description": tool.get("description"),
                     "type": ToolType.FUNCTION,
                     "enabled": True,
-                    "json_schema": schema  # Use json_schema field to match the model
+                    "json_schema": schema,  # Use json_schema field to match the model
+                    "configuration": tool.get("configuration")  # Use configuration from AI
                 }
                 formatted_tools.append(formatted_tool)
             
