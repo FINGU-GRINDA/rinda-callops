@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any, Annotated
 from time import perf_counter
 
 from livekit import agents, rtc, api
-from livekit.agents import llm, AutoSubscribe, JobContext, WorkerOptions, cli, AgentSession, Agent, RoomInputOptions
+from livekit.agents import llm, AutoSubscribe, JobContext, WorkerOptions, cli, AgentSession, Agent, RoomInputOptions, function_tool, RunContext
 from livekit.plugins import openai, deepgram, cartesia, silero, noise_cancellation
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -118,8 +118,8 @@ class CallActions(llm.ToolContext):
             
             # Create a closure to capture tool_id
             def make_tool_func(captured_tool_id: str):
-                async def tool_func():
-                    """Execute a custom tool without parameters"""
+                async def tool_func(context: RunContext):
+                    """Execute a custom tool with RunContext"""
                     try:
                         # No parameters needed for menu tools
                         params = {}
@@ -162,16 +162,16 @@ class CallActions(llm.ToolContext):
             # Create the function with unique name
             dynamic_func = make_tool_func(tool_id)
             
-            # Apply the decorator with proper name and description
+            # Apply the decorator with proper name and description using current function_tool
             if tool_info:
-                # Create a clear, unambiguous description
-                tool_func = llm.function_tool(
+                # Create a clear, unambiguous description using proper function_tool
+                tool_func = function_tool(
                     name=tool_info.name,
                     description=tool_info.description
                 )(dynamic_func)
                 return tool_func
             else:
-                return llm.function_tool(dynamic_func)
+                return function_tool()(dynamic_func)
             
         except Exception as e:
             logger.error(f"Error creating dynamic tool for {tool_id}: {e}")
@@ -188,13 +188,146 @@ class CallActions(llm.ToolContext):
         return {"error": f"Tool '{tool_name}' not found"}
 
 
+async def run_realtime_agent(
+    ctx: JobContext,
+    participant: rtc.RemoteParticipant,
+    agent_config: AgentModel,
+    tool_executor: ToolExecutor,
+):
+    """Run the agent using OpenAI Realtime API with MultimodalAgent"""
+    
+    logger.info("starting agent with OpenAI Realtime API")
+    logger.info(f"Agent config: name={agent_config.name}, language={agent_config.language}, voice={agent_config.voice}")
+
+    fnc_ctx = CallActions(
+        api=ctx.api,
+        participant=participant,
+        room=ctx.room,
+        agent_config=agent_config,
+        tool_executor=tool_executor,
+    )
+
+    # Get instructions and initial message
+    instructions = agent_config.instructions or "You are a helpful AI assistant."
+    
+    # Add tool usage instructions
+    tool_instructions = """
+
+CRITICAL INSTRUCTIONS FOR TOOL USAGE:
+
+1. NEVER call tools proactively or automatically - ONLY call tools when the user specifically asks for information
+2. DO NOT call tools during greetings or initial conversation
+3. ONLY call tools when the user explicitly requests specific information like menu, hours, location, etc.
+4. When a user asks for information, respond conversationally first, then call the appropriate tool
+5. Examples:
+   - User: "What's on your menu?" → You: "Let me get our menu for you..." [then call menu tool]
+   - User: "What are your hours?" → You: "Let me check our hours..." [then call hours tool]
+   - Initial greeting: Just greet - DO NOT call any tools
+6. Wait for the user to speak and ask questions before using any tools
+"""
+    instructions = f"{instructions}{tool_instructions}"
+    
+    # Add language instruction if needed
+    if agent_config.language and agent_config.language != "en-US":
+        language_name = {
+            "es-ES": "Spanish",
+            "fr-FR": "French",
+            "de-DE": "German",
+            "it-IT": "Italian",
+            "pt-BR": "Portuguese",
+            "ja-JP": "Japanese",
+            "ko-KR": "Korean",
+            "zh-CN": "Chinese"
+        }.get(agent_config.language, "the requested language")
+        instructions = f"{instructions}\n\nIMPORTANT: Always respond in {language_name} only."
+    
+    initial_message = agent_config.first_message or agent_config.greeting or "Hello! How can I help you today?"
+    
+    # Map voices to OpenAI Realtime voices
+    voice_mapping = {
+        "alloy": "alloy",
+        "echo": "echo",
+        "fable": "shimmer",
+        "onyx": "ash", 
+        "nova": "ballad",
+        "shimmer": "shimmer"
+    }
+    
+    # Get the appropriate voice for OpenAI Realtime
+    realtime_voice = voice_mapping.get(agent_config.voice, "alloy")
+    logger.info(f"Using OpenAI Realtime voice: {realtime_voice}")
+    
+    # Connect to room first
+    await ctx.connect()
+    
+    # Create and start the AgentSession with OpenAI Realtime API (v1.0 approach)
+    logger.info("Starting AgentSession with OpenAI Realtime API...")
+    try:
+        # Get the tools from the function context
+        agent_tools = fnc_ctx._tools if hasattr(fnc_ctx, '_tools') else []
+        logger.info(f"Agent has {len(agent_tools)} tools available")
+        
+        # Create agent with instructions and tools
+        agent = Agent(
+            instructions=instructions,
+            tools=agent_tools
+        )
+        
+        # Determine Deepgram language for STT
+        deepgram_language = "en" if agent_config.language == "en-US" else "multi"
+        
+        # Import TurnDetection for proper configuration
+        from openai.types.beta.realtime.session import TurnDetection
+        
+        # Create the session with OpenAI Realtime API + proper turn detection
+        session = AgentSession(
+            llm=openai.realtime.RealtimeModel(
+                voice=realtime_voice,
+                model="gpt-4o-realtime-preview",
+                modalities=["text", "audio"],
+                turn_detection=TurnDetection(
+                    type="server_vad",
+                    threshold=0.5,
+                    prefix_padding_ms=300,
+                    silence_duration_ms=500,
+                    create_response=True,
+                    interrupt_response=True,
+                ),
+            ),
+            stt=deepgram.STT(model="nova-3", language=deepgram_language),
+            vad=silero.VAD.load(),
+        )
+        
+        # Start the session
+        await session.start(
+            room=ctx.room,
+            agent=agent,
+        )
+        
+        # Wait longer for audio session to be fully established
+        logger.info(f"Waiting for audio session to be ready...")
+        await asyncio.sleep(3.0)  # Increased delay to ensure audio is ready
+        
+        logger.info(f"Sending initial greeting: {initial_message}")
+        await session.generate_reply(
+            instructions=f"Greet the user by saying: '{initial_message}'"
+        )
+        logger.info("Initial greeting sent successfully")
+        
+        logger.info("AgentSession started with OpenAI Realtime API")
+        
+    except Exception as e:
+        logger.error(f"Failed to start AgentSession: {e}")
+        raise
+
+
 async def run_multimodal_agent(
     ctx: JobContext,
     participant: rtc.RemoteParticipant,
     agent_config: AgentModel,
     tool_executor: ToolExecutor,
 ):
-    """Run the multimodal agent using STT-LLM-TTS pipeline with turn detection"""
+    """Run the multimodal agent using STT-LLM-TTS pipeline"""
     
     logger.info("starting multimodal agent with STT-LLM-TTS pipeline")
     logger.info(f"Agent config: name={agent_config.name}, language={agent_config.language}, voice={agent_config.voice}")
@@ -664,7 +797,8 @@ async def entrypoint(ctx: JobContext):
     if use_voice_pipeline:
         await run_voice_pipeline_agent(ctx, participant, agent_config, tool_executor)
     else:
-        await run_multimodal_agent(ctx, participant, agent_config, tool_executor)
+        # Use OpenAI Realtime API instead of STT-LLM-TTS pipeline
+        await run_realtime_agent(ctx, participant, agent_config, tool_executor)
 
 
 if __name__ == "__main__":
