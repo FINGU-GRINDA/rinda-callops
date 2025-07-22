@@ -1,0 +1,92 @@
+# Environment files (security critical)
+.env*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.staging
+
+# Security sensitive files
+*.key
+*.pem
+*.p12
+*.crt
+*.csr
+*.cert
+*.pfx
+service-account-key.json
+firebase-adminsdk-*.json
+credentials.json
+secrets.json
+*-service-account.json
+*serviceAccount*.json
+google-services.json
+GoogleService-Info.plist
+
+# Firebase specific
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+firebaseServiceAccount.json
+firebase-config.json
+firebase.config.json
+
+# API keys and tokens
+api-keys.json
+tokens.json
+auth-config.json
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Python
+__pycache__/
+*.py[oc]
+.venv/
+venv/
+env/
+
+# Logs
+*.log
+logs/
+temp/
+tmp/
+
+# Build outputs
+build/
+dist/
+out/
+.next/
+
+# Testing
+coverage/
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Misc
+*.swp
+*.swo
+*~
+.cache/
