@@ -1,0 +1,66 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+env/
+
+# Environment files (security critical)
+.env*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.staging
+
+# Security sensitive files
+*.key
+*.pem
+*.p12
+*.crt
+*.csr
+*.cert
+*.pfx
+service-account-key.json
+firebase-adminsdk-*.json
+credentials.json
+secrets.json
+config.yaml
+config.yml
+
+# API keys and tokens
+api-keys.json
+tokens.json
+auth-config.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Logs
+*.log
+logs/
+temp/
+tmp/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+htmlcov/
+.coverage
+.pytest_cache/

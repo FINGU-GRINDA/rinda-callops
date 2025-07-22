@@ -1,0 +1,116 @@
+/* Custom styles for React Flow components */
+
+/* Minimap styling - using default minimap with dark theme */
+.react-flow__minimap {
+  background-color: rgb(30, 41, 59);
+  border: 1px solid rgb(55, 65, 81);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Minimap mask for viewport indication */
+.react-flow__minimap-mask {
+  fill: rgb(59, 130, 246);
+  fill-opacity: 0.15;
+  stroke: rgb(59, 130, 246);
+  stroke-width: 2;
+  stroke-opacity: 0.5;
+}
+
+/* Minimap nodes should be visible */
+.react-flow__minimap-node {
+  cursor: pointer;
+}
+
+/* Minimap node styling by type */
+.minimap-node-business {
+  fill: #3B82F6 !important;
+  stroke: #1e40af !important;
+  stroke-width: 1px !important;
+}
+
+.minimap-node-personality {
+  fill: #10B981 !important;
+  stroke: #047857 !important;
+  stroke-width: 1px !important;
+}
+
+.minimap-node-voice {
+  fill: #A855F7 !important;
+  stroke: #7c3aed !important;
+  stroke-width: 1px !important;
+}
+
+.minimap-node-integration {
+  fill: #8B5CF6 !important;
+  stroke: #6d28d9 !important;
+  stroke-width: 1px !important;
+}
+
+.minimap-node-tool {
+  fill: #F97316 !important;
+  stroke: #c2410c !important;
+  stroke-width: 1px !important;
+}
+
+/* Minimap viewport */
+.react-flow__minimap svg {
+  background: transparent !important;
+}
+
+/* Controls styling */
+.react-flow__controls {
+  background-color: rgb(30, 41, 59) !important;
+  border: 1px solid rgb(55, 65, 81) !important;
+  border-radius: 0.5rem !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+}
+
+.react-flow__controls-button {
+  background-color: rgb(30, 41, 59) !important;
+  border-color: rgb(55, 65, 81) !important;
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
+.react-flow__controls-button:hover {
+  background-color: rgb(51, 65, 85) !important;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor !important;
+}
+
+/* Edge styling */
+.react-flow__edge-path {
+  stroke: #64748b !important;
+  stroke-width: 2 !important;
+}
+
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: #3b82f6 !important;
+  animation: dash 1s linear infinite !important;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* Handle styling */
+.react-flow__handle {
+  background: #ffffff !important;
+  border: 2px solid #3b82f6 !important;
+  width: 12px !important;
+  height: 12px !important;
+}
+
+.react-flow__handle-connecting {
+  background: #3b82f6 !important;
+}
+
+/* Background pattern */
+.react-flow__background pattern circle {
+  fill: rgba(148, 163, 184, 0.1) !important;
+}
