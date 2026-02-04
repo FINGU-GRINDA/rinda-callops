@@ -112,20 +112,7 @@ NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-XXXXXX
 ***REMOVED*** (from service account JSON)
 ***REMOVED***
 ***REMOVED***
-***REDACTED***\n...\n-----END PRIVATE KEY-----\n"
-***REMOVED***
-***REMOVED***
-***REMOVED***
-
-***REMOVED***
-
-***REMOVED***
-
-***REMOVED***env
-***REMOVED***
-***REMOVED***
-***REMOVED***
-***REDACTED***\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_PRIVATE_KEY="***REDACTED***\n...\n-----END PRIVATE KEY-----\n"
 ***REMOVED***
 ***REMOVED***
 ***REMOVED***
